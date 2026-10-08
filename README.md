@@ -1,4 +1,4 @@
-# 7z-pigz
+# 7zip-pigz
 
 基于 **7-Zip 26.04** 的修改版，将 **pigz 2.8 的并行 Deflate 分块算法**接入 GZIP 压缩。压缩后端在进程内调用 zlib，使用 7-Zip 的原生线程和流接口。
 
