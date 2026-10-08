@@ -96,6 +96,16 @@ ifndef O
 endif
 
 
+ifdef USE_PIGZ
+ifneq ($(filter $O/GzHandler.o,$(OBJS)),)
+LOCAL_FLAGS += -DZ7_USE_PIGZ
+OBJS += $O/PigzEncoder.o
+PIGZ_LIBS ?= -lz
+MY_LIBS += $(PIGZ_LIBS)
+CXX_INCLUDE_FLAGS += $(PIGZ_CFLAGS)
+endif
+endif
+
 ifdef DEF_FILE
 
 
@@ -747,6 +757,9 @@ $O/DeflateDecoder.o: ../../Compress/DeflateDecoder.cpp
 	$(CXX) $(CXXFLAGS) $<
 $O/DeflateEncoder.o: ../../Compress/DeflateEncoder.cpp
 	$(CXX) $(CXXFLAGS) $<
+$O/PigzEncoder.o: ../../Compress/PigzEncoder.cpp ../../Compress/PigzEncoder.h
+	$(CXX) $(CXXFLAGS) $<
+$O/GzHandler.o: ../../Compress/PigzEncoder.h
 $O/DeflateRegister.o: ../../Compress/DeflateRegister.cpp
 	$(CXX) $(CXXFLAGS) $<
 $O/DeltaFilter.o: ../../Compress/DeltaFilter.cpp

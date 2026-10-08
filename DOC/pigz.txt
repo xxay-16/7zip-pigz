@@ -1,0 +1,133 @@
+7-Zip with an in-process pigz gzip encoder
+========================================
+
+This modified build of 7-Zip 26.04 adapts the parallel Deflate block algorithm
+from Mark Adler's pigz 2.8. It calls zlib directly and uses 7-Zip's native
+threads. It does not start pigz.exe or depend on an external helper process.
+
+The integration applies to GZIP compression. GZIP decompression and the 7z,
+ZIP, XZ and other archive formats retain their original implementations.
+The standalone command-line binary is bin/7z-pigz.exe on Windows.
+
+Usage
+-----
+
+  7z-pigz a -tgzip -mmt=8 output.gz input.tar
+  7z-pigz a -tgzip -mm=Pigz -mmt=8 -mx=6 output.gz input.tar
+  7z-pigz a -tgzip -mm=Pigz -mmt=4 -mcc=256k output.gz input.tar
+  7z-pigz a -tgzip -mm=Deflate output.gz input.tar
+  7z-pigz t output.gz
+  7z-pigz x output.gz
+
+With USE_PIGZ enabled, gzip defaults to the pigz backend. -mm=Pigz explicitly
+selects it. -mm=Deflate selects the original 7-Zip encoder. If no method is
+specified, original Deflate tuning (-mfb, -mpass, -mmc, -ma) also selects the
+original encoder. Explicit Pigz rejects those unsupported tuning parameters.
+Unrecognized method names are rejected.
+
+Supported pigz settings:
+  -mx=0..9   zlib compression level (default: 5).
+  -mmt=N     compression workers (default: 7-Zip's detected CPU count).
+             Values above 256 are capped at 256. Zero is invalid.
+             -mmt=off / -mmt=1 uses the same encoder synchronously.
+  -mcc=SIZE  block size, 32 KiB through 16 MiB (default: 128 KiB).
+             Always specify a suffix, e.g. 128k or 1m; bare numbers use
+             7-Zip's logarithmic size syntax.
+
+The full pigz CLI and its -11 Zopfli mode are not included. Archive headers,
+file names, timestamps, CRC32 and the modulo-2^32 input size are managed by
+7-Zip. Outputs contain one standard gzip member and work with ordinary gzip,
+pigz and unmodified 7-Zip. Compression ratios can differ from 7-Zip Deflate.
+
+Implementation
+--------------
+
+CPP/7zip/Compress/PigzEncoder.{h,cpp} implements ICompressCoder. Each block
+uses the preceding 32 KiB as its Deflate dictionary. The pigz byte-alignment
+algorithm permits raw Deflate blocks to be concatenated in order, followed
+by one final empty block. A bounded ring reuses worker input/output buffers
+and zlib state. Memory scales with thread count and block size, not file size.
+Only the caller accesses COM streams, CRC state, and progress callbacks.
+Outstanding workers are joined before buffers are released on every exit.
+
+Build
+-----
+
+Requires zlib 1.2.6 or later, with headers and a library for the same compiler
+and architecture. This integration does not download build dependencies.
+Use a separate object directory when changing USE_PIGZ or ST_MODE.
+
+Windows / MinGW-w64, with GCC, GNU Make, windres and Git for Windows:
+
+  powershell -File scripts/build-pigz.ps1
+
+The script statically links the program and writes bin/7z-pigz.exe plus the
+license and this document. Pass -BashPath if Git Bash is installed elsewhere.
+
+GNU Make (Windows, Linux or macOS), from CPP/7zip/Bundles/Alone2:
+
+  make -j8 -f ../../cmpl_gcc.mak O=_o_pigz USE_PIGZ=1
+
+PIGZ_CFLAGS and PIGZ_LIBS can override zlib's include/link settings.
+For Windows in Git Bash, also pass MSYSTEM=MINGW64 and the Bash SHELL path.
+Omitting USE_PIGZ builds the original backend without a zlib dependency.
+The GNU Make hook also supports Alone (7za) and Format7zF (7z.dll).
+
+The NMAKE hook accepts USE_PIGZ=1 PIGZ_ZLIB_LIB=<static-zlib.lib> and optionally
+PIGZ_ZLIB_INCLUDE=<include-directory>. The library must match the selected
+MSVC architecture and runtime. This hook has not been validated with MSVC.
+The delivered binary is the command-line version; no GUI installer is built.
+
+Tests
+-----
+
+  python tests/test_pigz.py --exe bin/7z-pigz.exe \
+    --baseline CPP/7zip/Bundles/Alone2/_o_base/7zz.exe \
+    --pigz ../pigz/pigz.exe
+
+The baseline and standalone pigz are optional compatibility oracles. The
+tests cover block boundaries, thread-independent output, levels, custom
+blocks, single-member gzip/CRC/size validation, stdin/stdout, non-ASCII file
+names, legacy Deflate fallback, corruption detection, and 7z/ZIP regression.
+Tests write disposable artifacts under build-tests. --benchmark additionally
+records local timings; these are workload-specific, not speed guarantees.
+
+tests/PigzEncoderTest.cpp injects short reads/writes, input/output errors and
+progress cancellation directly into the encoder, verifies raw Deflate with
+zlib, and checks that the same coder can be reused after failures. See its
+header for a build command.
+
+Licenses and provenance
+-----------------------
+
+7-Zip's existing licenses continue to apply; see DOC/License.txt.
+The modified block implementation retains pigz's license in PigzEncoder.cpp.
+Upstream source: https://github.com/madler/pigz, commit
+fe4894f57739e3039a2ffc2a2a360d35e19bacbe (pigz 2.8).
+The integration is an altered implementation,
+not an official pigz or 7-Zip release.
+
+pigz license (Mark Adler)
+
+  This software is provided 'as-is', without any express or implied
+  warranty.  In no event will the author be held liable for any damages
+  arising from the use of this software.
+
+  Permission is granted to anyone to use this software for any purpose,
+  including commercial applications, and to alter it and redistribute it
+  freely, subject to the following restrictions:
+
+  1. The origin of this software must not be misrepresented; you must not
+     claim that you wrote the original software. If you use this software
+     in a product, an acknowledgment in the product documentation would be
+     appreciated but is not required.
+  2. Altered source versions must be plainly marked as such, and must not be
+     misrepresented as being the original software.
+  3. This notice may not be removed or altered from any source distribution.
+
+  Mark Adler
+  madler@alumni.caltech.edu
+
+zlib is a separate dependency distributed under the zlib license. This build
+was tested with zlib 1.3.1; its copyright/license notice is in zlib.h supplied
+with the toolchain. See https://zlib.net/zlib_license.html.

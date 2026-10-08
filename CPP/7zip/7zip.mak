@@ -1,3 +1,16 @@
+# Optional in-process gzip backend. Supply a zlib built for this toolchain.
+!IFDEF USE_PIGZ
+!IFNDEF PIGZ_ZLIB_LIB
+!ERROR USE_PIGZ requires PIGZ_ZLIB_LIB (path to the static zlib library)
+!ENDIF
+CFLAGS = $(CFLAGS) -DZ7_USE_PIGZ
+!IFDEF PIGZ_ZLIB_INCLUDE
+CFLAGS = $(CFLAGS) -I"$(PIGZ_ZLIB_INCLUDE)"
+!ENDIF
+LIBS = $(LIBS) "$(PIGZ_ZLIB_LIB)"
+COMPRESS_OBJS = $(COMPRESS_OBJS) $O\PigzEncoder.obj
+!ENDIF
+
 OBJS = \
   $O\StdAfx.obj \
   $(CURRENT_OBJS) \

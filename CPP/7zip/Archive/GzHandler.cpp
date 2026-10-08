@@ -20,6 +20,9 @@
 #include "../Compress/CopyCoder.h"
 #include "../Compress/DeflateDecoder.h"
 #include "../Compress/DeflateEncoder.h"
+#ifdef Z7_USE_PIGZ
+#include "../Compress/PigzEncoder.h"
+#endif
 
 #include "Common/HandlerOut.h"
 #include "Common/InStreamWithCRC.h"
@@ -919,6 +922,19 @@ static HRESULT ReportArcProps(IArchiveUpdateCallbackArcProp *reportArcProp,
 }
 */
 
+#ifdef Z7_USE_PIGZ
+static bool UsePigz(const CSingleMethodProps &props)
+{
+  if (!props.MethodName.IsEmpty())
+    return props.MethodName.IsEqualTo_Ascii_NoCase("pigz");
+  // Preserve the original encoder for its implementation-specific tuning.
+  return props.FindProp(NCoderPropID::kNumFastBytes) < 0
+      && props.FindProp(NCoderPropID::kNumPasses) < 0
+      && props.FindProp(NCoderPropID::kMatchFinderCycles) < 0
+      && props.FindProp(NCoderPropID::kAlgorithm) < 0;
+}
+#endif
+
 static HRESULT UpdateArchive(
     ISequentialOutStream *outStream,
     UInt64 unpackSize,
@@ -969,15 +985,35 @@ static HRESULT UpdateArchive(
   item.ExtraFlags = props.GetLevel() >= 7 ?
       NExtraFlags::kMaximum :
       NExtraFlags::kFastest;
+#ifdef Z7_USE_PIGZ
+  if (UsePigz(props))
+    item.ExtraFlags = props.GetLevel() == 9 ? NExtraFlags::kMaximum :
+        props.GetLevel() == 1 ? NExtraFlags::kFastest : 0;
+#endif
 
   item.HostOS = kHostOS;
 
   RINOK(item.WriteHeader(outStream))
 
-  CMyComPtr2_Create<ICompressCoder, NEncoder::CCOMCoder> deflateEncoder;
-
-  RINOK(props.SetCoderProps(deflateEncoder.ClsPtr(), NULL))
-  RINOK(deflateEncoder.Interface()->Code(crcStream, outStream, NULL, NULL, lps))
+#ifdef Z7_USE_PIGZ
+  if (UsePigz(props))
+  {
+    CMyComPtr2_Create<ICompressCoder, NPigz::CEncoder> pigzEncoder;
+    CMethodProps coderProps = props;
+#ifndef Z7_ST
+    if (coderProps.FindProp(NCoderPropID::kNumThreads) < 0)
+      coderProps.AddProp_NumThreads(props._numThreads);
+#endif
+    RINOK(coderProps.SetCoderProps(pigzEncoder.ClsPtr(), NULL))
+    RINOK(pigzEncoder.Interface()->Code(crcStream, outStream, NULL, NULL, lps))
+  }
+  else
+#endif
+  {
+    CMyComPtr2_Create<ICompressCoder, NEncoder::CCOMCoder> deflateEncoder;
+    RINOK(props.SetCoderProps(deflateEncoder.ClsPtr(), NULL))
+    RINOK(deflateEncoder.Interface()->Code(crcStream, outStream, NULL, NULL, lps))
+  }
 
   item.Crc = crcStream->GetCRC();
   unpackSizeReal = crcStream->GetSize();
@@ -1182,6 +1218,12 @@ Z7_COM7F_IMF(CHandler::SetProperties(const wchar_t * const *names, const PROPVAR
     }
     RINOK(_props.SetProperty(name, value))
   }
+#ifdef Z7_USE_PIGZ
+  if (!_props.MethodName.IsEmpty()
+      && !_props.MethodName.IsEqualTo_Ascii_NoCase("pigz")
+      && !_props.MethodName.IsEqualTo_Ascii_NoCase("Deflate"))
+    return E_INVALIDARG;
+#endif
   return S_OK;
 }
 
